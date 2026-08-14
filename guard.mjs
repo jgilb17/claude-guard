@@ -30,14 +30,13 @@ let input
 try { input = JSON.parse(raw) } catch { process.exit(0) }
 
 const deny = reason => {
-  console.log(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: reason
-    }
-  }))
-  process.exit(0)
+  /* Exit code 2 is the documented UNCONDITIONAL PreToolUse block: it stops the
+     tool call whether or not JSON is printed, and even a permissionDecision of
+     "allow" cannot override it. permissionDecision:"deny" was not trusted here
+     precisely because "ask" taught us an autonomous mode can ignore a soft
+     decision. The reason goes to stderr, which the model reads. */
+  process.stderr.write('BLOCKED by guard: ' + reason + '\n')
+  process.exit(2)
 }
 
 const tool = String(input.tool_name || '')
