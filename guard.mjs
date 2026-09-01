@@ -55,14 +55,33 @@ if (GH_WRITE.has(tool)) deny('a GitHub write tool commits over the API with no g
 
 if (tool === 'Bash') {
   const cmd = String(input.tool_input?.command ?? '')
-  if (/\.env\b/i.test(cmd)) deny('command touches a .env file; credentials never enter the transcript')
+
+  /* A heredoc that feeds a FILE WRITE is content, not commands. Only cat and
+     tee with a redirect qualify, so psql <<'SQL' ... SQL is still inspected.
+     Without this, writing a check suite whose assertions mention drop or
+     delete is denied, which blocks the honest path and nothing else. */
+  const scan = cmd.replace(
+    /(^|\n)\s*(?:cat|tee)[^\n<]*>[^\n<]*<<-?\s*'?([A-Za-z_][A-Za-z0-9_]*)'?[\s\S]*?\n\2\b/g,
+    '$1<file body removed>'
+  )
+
+  /* process.env is JavaScript, not a credentials file. Everything else that
+     says .env is still denied, on the raw command. */
+  const envText = cmd.replace(/process\.env\b/g, 'process_env')
+  if (/\.env\b/i.test(envText)) deny('command touches a .env file; credentials never enter the transcript')
+
   if (/\.claude\/settings|guard\.mjs|obsidian-recall-safe\.sh|obsidian-session-end\.sh/i.test(cmd)) deny('command touches guardrail or authority-bearing hook files')
+
   /* TIER TWO — autonomous (or degraded) only; attended sessions prompt via settings rules. */
   if (AUTONOMOUS) {
-    if (/\bgit\s+push\b/i.test(cmd)) deny('git push in an autonomous session is blocked; a deploy-branch push must be attended')
-    if (/\brm\b/i.test(cmd)) deny('rm in an autonomous session is blocked')
-    if (/\bsudo\b/i.test(cmd)) deny('sudo in an autonomous session is blocked')
-    if (/\b(drop|truncate|delete)\b/i.test(cmd)) deny('drop, truncate or delete in an autonomous session is blocked')
+    if (/\bgit\s+push\b/i.test(scan)) {
+      const forced = /\s(--force\b|-f\b|--force-with-lease\b|--all\b|--mirror\b|--delete\b)/i.test(scan)
+      const named = /\bgit\s+push\s+(?:-u\s+|--set-upstream\s+)?[A-Za-z0-9._-]+\s+claude\/[A-Za-z0-9._\/-]+(?::claude\/[A-Za-z0-9._\/-]+)?\s*$/i.test(scan)
+      if (forced || !named) deny('a push in an autonomous session is limited to an explicit claude/* feature branch; a deploy-branch or force push must be attended')
+    }
+    if (/\brm\b/i.test(scan)) deny('rm in an autonomous session is blocked')
+    if (/\bsudo\b/i.test(scan)) deny('sudo in an autonomous session is blocked')
+    if (/\b(drop|truncate|delete)\b/i.test(scan)) deny('drop, truncate or delete in an autonomous session is blocked')
   }
 }
 
