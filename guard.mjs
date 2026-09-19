@@ -85,9 +85,40 @@ if (tool === 'Bash') {
   }
 }
 
+function sqlCode (q, bs) {
+  let out = '', i = 0
+  const n = q.length
+  while (i < n) {
+    const c = q[i], d = q[i + 1]
+    if (c === '-' && d === '-') { const j = q.indexOf('\n', i); i = j < 0 ? n : j; out += ' '; continue }
+    if (c === '/' && d === '*') { const j = q.indexOf('*/', i + 2); i = j < 0 ? n : j + 2; out += ' '; continue }
+    if (c === "'" || c === '"') {
+      i++
+      while (i < n) {
+        if (bs && c === "'" && q[i] === '\\') { i += 2; continue }
+        if (q[i] === c) { if (q[i + 1] === c) { i += 2; continue } i++; break }
+        i++
+      }
+      out += ' '
+      continue
+    }
+    if (c === '$' && !/[A-Za-z0-9_$]/.test(q[i - 1] || '')) {
+      const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(q.slice(i))
+      if (m) { const j = q.indexOf(m[0], i + m[0].length); i = j < 0 ? n : j + m[0].length; out += ' '; continue }
+    }
+    out += c
+    i++
+  }
+  return out
+}
+
 if (/^mcp__(claude_ai_)?Supabase__execute_sql$/.test(tool)) {
   const q = String(input.tool_input?.query ?? '')
-  if (/\b(drop|truncate|delete|alter|grant)\b/i.test(q)) deny('SQL contains drop, truncate, delete, alter or grant')
+  const blocked = /\b(drop|truncate|delete|alter|grant|revoke|create|do|execute|call|copy)\b/i
+  for (const bs of [false, true]) {
+    const m = sqlCode(q, bs).match(blocked)
+    if (m) deny('SQL contains ' + m[0].toLowerCase() + '; DDL, deletes and dynamic SQL are blocked in execute_sql, use apply_migration or run it yourself')
+  }
 }
 
 process.exit(0)
