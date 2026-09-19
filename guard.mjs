@@ -85,7 +85,7 @@ if (tool === 'Bash') {
   }
 }
 
-if (tool === 'mcp__Supabase__execute_sql') {
+if (/^mcp__(claude_ai_)?Supabase__execute_sql$/.test(tool)) {
   const q = String(input.tool_input?.query ?? '')
   if (/\b(drop|truncate|delete|alter|grant)\b/i.test(q)) deny('SQL contains drop, truncate, delete, alter or grant')
 }
