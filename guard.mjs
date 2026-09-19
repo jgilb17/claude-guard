@@ -72,17 +72,44 @@ if (tool === 'Bash') {
 
   if (/\.claude\/settings|guard\.mjs|obsidian-recall-safe\.sh|obsidian-session-end\.sh/i.test(cmd)) deny('command touches guardrail or authority-bearing hook files')
 
-  /* TIER TWO — autonomous (or degraded) only; attended sessions prompt via settings rules. */
+  /* TIER TWO — autonomous (or degraded) only; attended sessions prompt via settings rules.
+     Checked per shell segment. Quoted prose in git commit/tag, gh pr/issue/release and grep/rg
+     is ignored, except double-quoted text containing $( or a backtick, which the shell runs. */
   if (AUTONOMOUS) {
-    if (/\bgit\s+push\b/i.test(scan)) {
-      const forced = /\s(--force\b|-f\b|--force-with-lease\b|--all\b|--mirror\b|--delete\b)/i.test(scan)
-      const named = /\bgit\s+push\s+(?:-u\s+|--set-upstream\s+)?[A-Za-z0-9._-]+\s+claude\/[A-Za-z0-9._\/-]+(?::claude\/[A-Za-z0-9._\/-]+)?\s*$/i.test(scan)
+    const segs = shellSegments(scan.replace(/\d*>&\d+/g, ' '))
+    const QUIET = /^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:git\s+(?:commit|tag)|gh\s+(?:pr|issue|release)|grep|rg)\b/
+    const clean = segs.map(s => QUIET.test(s) ? s.replace(/'[^']*'|"(?:[^"\\$`]|\\.|\$(?!\())*"/g, ' ') : s)
+    for (const seg of clean) {
+      if (!/\bgit\s+push\b/i.test(seg)) continue
+      const p = seg.replace(/\s+\d*>>?\s*\S+/g, '').trim()
+      const forced = /\s(--force\b|-f\b|--force-with-lease\b|--all\b|--mirror\b|--delete\b)/i.test(p)
+      const named = /^git\s+push\s+(?:-u\s+|--set-upstream\s+)?[A-Za-z0-9._-]+\s+claude\/[A-Za-z0-9._\/-]+(?::claude\/[A-Za-z0-9._\/-]+)?$/i.test(p)
       if (forced || !named) deny('a push in an autonomous session is limited to an explicit claude/* feature branch; a deploy-branch or force push must be attended')
     }
-    if (/\brm\b/i.test(scan)) deny('rm in an autonomous session is blocked')
-    if (/\bsudo\b/i.test(scan)) deny('sudo in an autonomous session is blocked')
-    if (/\b(drop|truncate|delete)\b/i.test(scan)) deny('drop, truncate or delete in an autonomous session is blocked')
+    const body = clean.join('\n')
+    if (/\brm\b/i.test(body)) deny('rm in an autonomous session is blocked')
+    if (/\bsudo\b/i.test(body)) deny('sudo in an autonomous session is blocked')
+    if (/\b(drop|truncate|delete)\b/i.test(body)) deny('drop, truncate or delete in an autonomous session is blocked')
   }
+}
+
+function shellSegments (s) {
+  const out = []
+  let cur = '', q = null
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (q) {
+      cur += c
+      if (c === '\\' && q === '"') { cur += s[++i] || ''; continue }
+      if (c === q) q = null
+      continue
+    }
+    if (c === "'" || c === '"') { q = c; cur += c; continue }
+    if (c === ';' || c === '\n' || c === '|' || c === '&') { if (cur.trim()) out.push(cur); cur = ''; continue }
+    cur += c
+  }
+  if (cur.trim()) out.push(cur)
+  return out
 }
 
 function sqlCode (q, bs) {
