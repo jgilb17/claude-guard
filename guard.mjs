@@ -65,10 +65,22 @@ if (tool === 'Bash') {
     '$1<file body removed>'
   )
 
-  /* process.env is JavaScript, not a credentials file. Everything else that
-     says .env is still denied, on the raw command. */
+  /* .env AS A FILE, not as text (8 Oct 2026). The old test was /\.env\b/ on the whole command, so
+     every JavaScript property named env (s.env, cfg.env, opts.env) was denied as if it were a
+     credentials file, and a settings script that wrote s.env={...} could not run. A file is
+     recognised by its position instead:
+       DOTFILE   .env or .env.<suffix> at the start of a word or after a path slash
+                 (cat .env, ./app/.env.local, "$HOME/.env", <.env, x=.env)
+       NAMED     a whole word ending in .env or .env.<lowercase suffix> (prod.env,
+                 config/staging.env.bak), the word standing alone: after whitespace, a quote, = or a
+                 redirect, and before the end, whitespace, a quote, ; | & < > or ). The file stem has
+                 no dots of its own, so import.meta.env and cfg.env.FOO read as code, not files.
+     What is no longer denied is .env glued to an identifier inside code (s.env=, cfg.env.KEY,
+     fn(opts.env)). process.env is still neutralised first, as before. */
   const envText = cmd.replace(/process\.env\b/g, 'process_env')
-  if (/\.env\b/i.test(envText)) deny('command touches a .env file; credentials never enter the transcript')
+  const ENV_DOTFILE = /(^|[\s'"`=:\/<>|;&(])\.env(\.[\w.-]+)?(?![\w])/i
+  const ENV_NAMED = /(^|[\s'"`=<>|;&])(?:[\w.~$-]*\/)*[\w-]+\.env(\.[a-z0-9][a-z0-9.-]*)?(?=$|[\s'"`;|&<>)])/
+  if (ENV_DOTFILE.test(envText) || ENV_NAMED.test(envText)) deny('command touches a .env file; credentials never enter the transcript')
 
   if (/\.claude\/settings|guard\.mjs|obsidian-recall-safe\.sh|obsidian-session-end\.sh/i.test(cmd)) deny('command touches guardrail or authority-bearing hook files')
 
